@@ -1,0 +1,21 @@
+{
+  "name": "campushub-vulnerable-api",
+  "version": "1.0.0",
+  "description": "Intentionally vulnerable API for Datadog security demos",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "start:dd": "DD_SERVICE=campushub-api DD_ENV=demo DD_VERSION=1.0.0 DD_APPSEC_ENABLED=true DD_IAST_ENABLED=true node --require dd-trace/init src/server.js"
+  },
+  "dependencies": {
+    "body-parser": "1.19.0",
+    "cookie-parser": "1.4.5",
+    "dd-trace": "5.43.0",
+    "ejs": "2.6.1",
+    "express": "4.17.1",
+    "jsonwebtoken": "8.5.1",
+    "lodash": "4.17.20",
+    "sqlite3": "5.1.7"
+  },
+  "devDependencies": {}
+}
