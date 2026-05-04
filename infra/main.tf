@@ -1,14 +1,6 @@
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
-
-provider "aws" {
-  region = "us-east-1"
+variable "datadog_api_key" {
+  type      = string
+  sensitive = true
 }
 
 # IaC scan: public bucket / data exposure risk.
@@ -25,15 +17,20 @@ resource "aws_s3_bucket_public_access_block" "student_exports" {
   restrict_public_buckets = false
 }
 
-# IaC scan: wide-open ingress.
+# IaC/secrets demo: intentionally bad practice.
+variable "database_password" {
+  type    = string
+  default = "UniversityDemoPassword123!"
+}
+
 resource "aws_security_group" "campushub_api" {
   name        = "campushub-api-demo"
   description = "Intentionally vulnerable demo SG"
 
   ingress {
-    description = "Open HTTP"
-    from_port   = 80
-    to_port     = 80
+    description = "Open demo app"
+    from_port   = 3000
+    to_port     = 3000
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -43,7 +40,7 @@ resource "aws_security_group" "campushub_api" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = ["0.0.0.0/32"]
   }
 
   egress {
@@ -54,8 +51,87 @@ resource "aws_security_group" "campushub_api" {
   }
 }
 
-# IaC/secrets demo: intentionally bad practice.
-variable "database_password" {
-  type    = string
-  default = "UniversityDemoPassword123!"
+data "aws_ami" "amazon_linux_2023" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-*-x86_64"]
+  }
+
+  filter {
+    name   = "architecture"
+    values = ["x86_64"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
+resource "aws_instance" "campushub_api" {
+  ami                    = data.aws_ami.amazon_linux_2023.id
+  instance_type          = "t3.micro"
+  vpc_security_group_ids = [aws_security_group.campushub_api.id]
+
+  user_data = <<-EOF
+    #!/bin/bash
+    set -eux
+
+    yum update -y
+    yum install -y curl git
+
+    curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+    yum install -y nodejs
+
+    DD_API_KEY=${var.datadog_api_key} DD_SITE="datadoghq.com" bash -c "$(curl -L https://s3.amazonaws.com/dd-agent/scripts/install_script.sh)"
+
+    cat >> /etc/datadog-agent/datadog.yaml <<DDCONF
+    apm_config:
+      enabled: true
+
+    appsec_config:
+      enabled: true
+    DDCONF
+
+    systemctl restart datadog-agent
+
+    cd /opt
+    git clone https://github.com/nascowe/campushub-vulnerable.git
+    cd campushub-vulnerable/backend
+    npm install
+
+    cat > /etc/systemd/system/campushub.service <<SERVICE
+    [Unit]
+    Description=CampusHub Vulnerable Demo
+    After=network.target datadog-agent.service
+
+    [Service]
+    WorkingDirectory=/opt/campushub-vulnerable/backend
+    Environment=DD_SERVICE=campushub-api
+    Environment=DD_ENV=demo
+    Environment=DD_VERSION=1.0.0
+    Environment=DD_APPSEC_ENABLED=true
+    Environment=DD_IAST_ENABLED=true
+    ExecStart=/usr/bin/node --require dd-trace/init src/server.js
+    Restart=always
+
+    [Install]
+    WantedBy=multi-user.target
+    SERVICE
+
+    systemctl daemon-reload
+    systemctl enable campushub
+    systemctl start campushub
+  EOF
+
+  tags = {
+    Name = "campushub-api-demo"
+  }
+}
+
+output "campushub_public_ip" { 
+  value = aws_instance.campushub_api.public_ip 
 }
