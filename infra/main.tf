@@ -35,14 +35,6 @@ resource "aws_security_group" "campushub_api" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  ingress {
-    description = "Open SSH"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/32"]
-  }
-
   egress {
     from_port   = 0
     to_port     = 0
@@ -103,8 +95,8 @@ resource "aws_instance" "campushub_api" {
   systemctl restart datadog-agent
 
   cd /opt
-  git clone https://github.com/nascowe/campushub-vulnerable.git
-  cd campushub-vulnerable/backend
+  git clone https://github.com/nascowe/badapp-demo.git
+  cd badapp-demo/backend
   npm install
 
   cat > /etc/systemd/system/campushub.service <<SERVICE
@@ -113,7 +105,7 @@ resource "aws_instance" "campushub_api" {
   After=network.target datadog-agent.service
 
   [Service]
-  WorkingDirectory=/opt/campushub-vulnerable/backend
+  WorkingDirectory=/opt/badapp-demo/backend
   Environment=DD_SERVICE=campushub-api
   Environment=DD_ENV=demo
   Environment=DD_VERSION=1.0.0
@@ -126,11 +118,29 @@ resource "aws_instance" "campushub_api" {
   WantedBy=multi-user.target
   SERVICE
 
+  cat > /etc/systemd/system/campushub-traffic.service <<TRAFFIC
+  [Unit]
+  Description=CampusHub demo traffic generator
+  After=campushub.service
+  Requires=campushub.service
+
+  [Service]
+  WorkingDirectory=/opt/badapp-demo
+  ExecStartPre=/bin/sleep 10
+  ExecStart=/bin/bash /opt/badapp-demo/generate-realistic-traffic.sh
+  Restart=always
+  StandardOutput=append:/var/log/campushub-traffic.log
+  StandardError=append:/var/log/campushub-traffic.log
+
+  [Install]
+  WantedBy=multi-user.target
+  TRAFFIC
+
+  chmod +x /opt/badapp-demo/generate-realistic-traffic.sh
+
   systemctl daemon-reload
-  systemctl enable campushub
-  systemctl start campushub
-  
-  ./generate-realistic-traffic.sh
+  systemctl enable --now campushub
+  systemctl enable --now campushub-traffic
 
   EOF
 

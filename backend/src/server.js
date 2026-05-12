@@ -49,7 +49,7 @@ app.get('/', (req, res) => {
 // SAST/IAST/DAST: SQL injection via string concatenation.
 app.get('/api/students/search', (req, res) => {
   const q = req.query.q || '';
-  const sql = "SELECT id, name, email, role FROM students WHERE name LIKE '%" + q + "%'");
+  const sql = "SELECT id, name, email, role FROM students WHERE name LIKE '%" + q + "%'";
   db.all(sql, (err, rows) => {
     if (err) return res.status(500).json({ error: err.message, sql });
     res.json({ query: q, sql, results: rows });
