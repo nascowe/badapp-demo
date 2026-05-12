@@ -43,13 +43,36 @@ resource "aws_security_group" "campushub_api" {
   }
 }
 
+resource "aws_iam_role" "campushub_ec2" {
+  name = "campushub-ec2-demo"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "campushub_ssm" {
+  role       = aws_iam_role.campushub_ec2.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "campushub_ec2" {
+  name = "campushub-ec2-demo"
+  role = aws_iam_role.campushub_ec2.name
+}
+
 data "aws_ami" "amazon_linux_2023" {
   most_recent = true
   owners      = ["amazon"]
 
   filter {
     name   = "name"
-    values = ["al2023-ami-*-x86_64"]
+    values = ["al2023-ami-2023*-x86_64"]
   }
 
   filter {
@@ -64,9 +87,11 @@ data "aws_ami" "amazon_linux_2023" {
 }
 
 resource "aws_instance" "campushub_api" {
-  ami                    = data.aws_ami.amazon_linux_2023.id
-  instance_type          = "t3.micro"
-  vpc_security_group_ids = [aws_security_group.campushub_api.id]
+  ami                         = data.aws_ami.amazon_linux_2023.id
+  instance_type               = "t3.micro"
+  vpc_security_group_ids      = [aws_security_group.campushub_api.id]
+  iam_instance_profile        = aws_iam_instance_profile.campushub_ec2.name
+  user_data_replace_on_change = true
 
   user_data = <<-EOF
   #!/bin/bash
@@ -111,6 +136,7 @@ resource "aws_instance" "campushub_api" {
   Environment=DD_VERSION=1.0.0
   Environment=DD_APPSEC_ENABLED=true
   Environment=DD_IAST_ENABLED=true
+  Environment=DD_APPSEC_SCA_ENABLED=true
   ExecStart=/usr/bin/node --require dd-trace/init src/server.js
   Restart=always
 
