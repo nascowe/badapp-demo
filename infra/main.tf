@@ -77,54 +77,61 @@ resource "aws_instance" "campushub_api" {
   vpc_security_group_ids = [aws_security_group.campushub_api.id]
 
   user_data = <<-EOF
-    #!/bin/bash
-    set -eux
+  #!/bin/bash
+  set -euo pipefail
 
-    yum update -y
-    yum install -y curl git
+  exec > /var/log/campushub-user-data.log 2>&1
 
-    curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
-    yum install -y nodejs
+  trap 'echo "USER DATA FAILED"; tail -n 200 /var/log/campushub-user-data.log; test -f /tmp/ddog_install_error_msg && cat /tmp/ddog_install_error_msg' ERR
 
-    DD_API_KEY=${var.datadog_api_key} DD_SITE="datadoghq.com" bash -c "$(curl -L https://s3.amazonaws.com/dd-agent/scripts/install_script.sh)"
+  yum update -y
+  yum install -y git
 
-    cat >> /etc/datadog-agent/datadog.yaml <<DDCONF
-    apm_config:
-      enabled: true
+  curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+  yum install -y nodejs
 
-    appsec_config:
-      enabled: true
-    DDCONF
+  DD_API_KEY=${var.datadog_api_key} DD_SITE="datadoghq.com" bash -c "$(curl -L https://install.datadoghq.com/scripts/install_script_agent7.sh)"
 
-    systemctl restart datadog-agent
+  cat >> /etc/datadog-agent/datadog.yaml <<DDCONF
+  apm_config:
+    enabled: true
 
-    cd /opt
-    git clone https://github.com/nascowe/campushub-vulnerable.git
-    cd campushub-vulnerable/backend
-    npm install
+  appsec_config:
+    enabled: true
+  DDCONF
 
-    cat > /etc/systemd/system/campushub.service <<SERVICE
-    [Unit]
-    Description=CampusHub Vulnerable Demo
-    After=network.target datadog-agent.service
+  systemctl restart datadog-agent
 
-    [Service]
-    WorkingDirectory=/opt/campushub-vulnerable/backend
-    Environment=DD_SERVICE=campushub-api
-    Environment=DD_ENV=demo
-    Environment=DD_VERSION=1.0.0
-    Environment=DD_APPSEC_ENABLED=true
-    Environment=DD_IAST_ENABLED=true
-    ExecStart=/usr/bin/node --require dd-trace/init src/server.js
-    Restart=always
+  cd /opt
+  git clone https://github.com/nascowe/campushub-vulnerable.git
+  cd campushub-vulnerable/backend
+  npm install
 
-    [Install]
-    WantedBy=multi-user.target
-    SERVICE
+  cat > /etc/systemd/system/campushub.service <<SERVICE
+  [Unit]
+  Description=CampusHub Vulnerable Demo
+  After=network.target datadog-agent.service
 
-    systemctl daemon-reload
-    systemctl enable campushub
-    systemctl start campushub
+  [Service]
+  WorkingDirectory=/opt/campushub-vulnerable/backend
+  Environment=DD_SERVICE=campushub-api
+  Environment=DD_ENV=demo
+  Environment=DD_VERSION=1.0.0
+  Environment=DD_APPSEC_ENABLED=true
+  Environment=DD_IAST_ENABLED=true
+  ExecStart=/usr/bin/node --require dd-trace/init src/server.js
+  Restart=always
+
+  [Install]
+  WantedBy=multi-user.target
+  SERVICE
+
+  systemctl daemon-reload
+  systemctl enable campushub
+  systemctl start campushub
+  
+  ./generate-realistic-traffic.sh
+
   EOF
 
   tags = {
